@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -12,13 +11,12 @@ st.set_page_config(page_title="Chili Hybrid Explorer", layout="wide")
 model = None
 model_file = "success_score_model.pkl"
 try:
-    with open("success_score_model.pkl", "rb") as f:
+    with open(model_file, "rb") as f:
         model = pickle.load(f)
     st.sidebar.success("✅ AI model loaded successfully!")
 except Exception as e:
     st.sidebar.error(f"❌ AI model failed to load: {e}")
     model = None
-
 
 # Custom header with branding
 st.markdown(
@@ -58,13 +56,19 @@ if uploaded_file is not None and model is not None:
     df["Predicted Flavor"] = df["Expected Flavor"].apply(lambda x: "Complex & Fruity")
     df["Estimated Days to Harvest"] = 90
 
-    df_encoded = pd.get_dummies(df, columns=['Expected Yield', 'Climate Suitability (Cyprus)'])
-    missing_cols = set(model.feature_names_in_) - set(df_encoded.columns)
-    for col in missing_cols:
-        df_encoded[col] = 0
-    df_encoded = df_encoded[model.feature_names_in_]
+    st.sidebar.info("🔎 Preparing AI features...")
+    try:
+        df_encoded = pd.get_dummies(df, columns=['Expected Yield', 'Climate Suitability (Cyprus)'])
+        missing_cols = set(model.feature_names_in_) - set(df_encoded.columns)
+        st.sidebar.write(f"Missing columns: {missing_cols}")
+        for col in missing_cols:
+            df_encoded[col] = 0
+        df_encoded = df_encoded[model.feature_names_in_]
 
-    df['AI Success Score'] = model.predict(df_encoded)
+        df['AI Success Score'] = model.predict(df_encoded)
+        st.sidebar.success("✅ AI Success Score predictions complete!")
+    except Exception as e:
+        st.sidebar.error(f"❌ Error generating AI predictions: {e}")
 
     st.sidebar.header("Pepper Combination Tool")
     parent_options = sorted(set(df["Parent A"]).union(df["Parent B"]))
