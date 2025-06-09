@@ -1,8 +1,8 @@
-
 import streamlit as st
 import pandas as pd
 import altair as alt
 import numpy as np
+import io
 
 st.set_page_config(page_title="Chili Hybrid Explorer", layout="wide")
 
@@ -91,10 +91,15 @@ if uploaded_file is not None:
 
     st.altair_chart(scatter, use_container_width=True)
 
-    # Download filtered data as Excel
+    # Download filtered data as Excel using BytesIO
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    processed_data = output.getvalue()
+
     st.download_button(
         label="Download Filtered Data as Excel",
-        data=df.to_excel(index=False, engine='openpyxl'),
+        data=processed_data,
         file_name="filtered_hybrids.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
