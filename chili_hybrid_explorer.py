@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import numpy as np
+import sqlite3
 import io
 import pickle
 
@@ -17,6 +18,23 @@ try:
 except Exception as e:
     st.sidebar.error(f"❌ AI model failed to load: {e}")
     model = None
+
+# Connect to SQLite database
+conn = sqlite3.connect("hybrids.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS hybrids (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_a TEXT,
+        parent_b TEXT,
+        expected_heat INTEGER,
+        expected_yield TEXT,
+        climate_suitability TEXT,
+        expected_flavor TEXT,
+        ai_success_score TEXT
+    )
+""")
+conn.commit()
 
 # Custom header with branding
 st.markdown(
@@ -41,103 +59,82 @@ st.markdown(
 )
 
 st.markdown('<div class="main-header">🌶️ Chili Hybrid Explorer 🌶️</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Now AI-Powered! Predict Success Scores for Hybrid Combinations</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Now Database-Driven! Add and View Hybrid Combinations Over Time</div>', unsafe_allow_html=True)
 
-# Sidebar for filters and search
-st.sidebar.header("Filters & Options")
+# Data entry form
+st.sidebar.header("Add New Hybrid Combination")
+with st.sidebar.form("add_hybrid"):
+    parent_a = st.text_input("Parent A")
+    parent_b = st.text_input("Parent B")
+    expected_heat = st.number_input("Expected Heat (SHU)", min_value=0, step=5000)
+    expected_yield = st.selectbox("Expected Yield", ["Low", "Medium", "High", "Very High"])
+    climate_suitability = st.selectbox("Climate Suitability (Cyprus)", ["Low", "Medium", "High"])
+    expected_flavor = st.text_input("Expected Flavor")
+    submitted = st.form_submit_button("Add Hybrid")
 
-# File upload
-uploaded_file = st.sidebar.file_uploader("Upload your Hybrid Chili Combinations Excel file", type=["xlsx"])
+    if submitted:
+        ai_success_score = "Unknown"
+        if model:
+            # Prepare feature set
+            input_df = pd.DataFrame({
+                "Expected Heat (SHU)": [expected_heat],
+                "Expected Yield": [expected_yield],
+                "Climate Suitability (Cyprus)": [climate_suitability]
+            })
+            input_encoded = pd.get_dummies(input_df, columns=['Expected Yield', 'Climate Suitability (Cyprus)'])
+            missing_cols = set(model.feature_names_in_) - set(input_encoded.columns)
+            for col in missing_cols:
+                input_encoded[col] = 0
+            input_encoded = input_encoded[model.feature_names_in_]
+            ai_success_score = model.predict(input_encoded)[0]
 
-if uploaded_file is not None and model is not None:
-    df = pd.read_excel(uploaded_file)
+        cursor.execute("""
+            INSERT INTO hybrids (parent_a, parent_b, expected_heat, expected_yield, climate_suitability, expected_flavor, ai_success_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (parent_a, parent_b, expected_heat, expected_yield, climate_suitability, expected_flavor, ai_success_score))
+        conn.commit()
+        st.sidebar.success(f"✅ Hybrid added with AI Success Score: {ai_success_score}")
 
-    df["Novelty Flag"] = "Likely Novel"
-    df["Predicted Flavor"] = df["Expected Flavor"].apply(lambda x: "Complex & Fruity")
-    df["Estimated Days to Harvest"] = 90
+# Load and display hybrids from database
+df = pd.read_sql_query("SELECT * FROM hybrids", conn)
 
-    st.sidebar.info("🔎 Preparing AI features...")
-    try:
-        df_encoded = pd.get_dummies(df, columns=['Expected Yield', 'Climate Suitability (Cyprus)'])
-        missing_cols = set(model.feature_names_in_) - set(df_encoded.columns)
-        st.sidebar.write(f"Missing columns: {missing_cols}")
-        for col in missing_cols:
-            df_encoded[col] = 0
-        df_encoded = df_encoded[model.feature_names_in_]
+sort_by = st.sidebar.selectbox("Sort By:", options=["expected_heat", "expected_yield", "ai_success_score"], index=0)
+df = df.sort_values(by=sort_by, ascending=False)
 
-        df['AI Success Score'] = model.predict(df_encoded)
-        st.sidebar.success("✅ AI Success Score predictions complete!")
-    except Exception as e:
-        st.sidebar.error(f"❌ Error generating AI predictions: {e}")
+def highlight_heat(val):
+    if val >= 1000000:
+        color = '#ff4c4c'
+    elif val >= 500000:
+        color = '#ff944c'
+    else:
+        color = '#ffd24c'
+    return f'background-color: {color}'
 
-    st.sidebar.header("Pepper Combination Tool")
-    parent_options = sorted(set(df["Parent A"]).union(df["Parent B"]))
-    selected_parent_a = st.sidebar.selectbox("Select Parent A:", parent_options)
-    selected_parent_b = st.sidebar.selectbox("Select Parent B:", parent_options)
+st.write("## All Hybrid Combinations (Database)")
+st.dataframe(df.style.applymap(highlight_heat, subset=['expected_heat']))
 
-    if selected_parent_a and selected_parent_b:
-        parent_a_data = df[(df["Parent A"] == selected_parent_a) | (df["Parent B"] == selected_parent_a)].iloc[0]
-        parent_b_data = df[(df["Parent A"] == selected_parent_b) | (df["Parent B"] == selected_parent_b)].iloc[0]
+# Scatter plot
+st.write("## Heat vs. AI Success Score")
+scatter = alt.Chart(df).mark_circle(size=100).encode(
+    x=alt.X('expected_heat:Q', title='Expected Heat (SHU)'),
+    y=alt.Y('ai_success_score:N', title='AI Success Score'),
+    color=alt.Color('ai_success_score:N', legend=alt.Legend(title="AI Success Score")),
+    tooltip=['parent_a', 'parent_b', 'expected_heat', 'expected_yield', 'climate_suitability', 'expected_flavor', 'ai_success_score']
+).interactive().properties(width=800, height=400)
 
-        expected_heat = (parent_a_data["Expected Heat (SHU)"] + parent_b_data["Expected Heat (SHU)"]) // 2
-        expected_flavor = f"{parent_a_data['Expected Flavor']} + {parent_b_data['Expected Flavor']}"
-        expected_yield = parent_a_data['Expected Yield'] if parent_a_data['Expected Yield'] == 'Very High' or parent_b_data['Expected Yield'] == 'Very High' else 'High'
-        expected_climate = 'High' if parent_a_data['Climate Suitability (Cyprus)'] == 'High' and parent_b_data['Climate Suitability (Cyprus)'] == 'High' else 'Medium'
+st.altair_chart(scatter, use_container_width=True)
 
-        st.markdown("## Expected Hybrid Results")
-        st.markdown(f"**Expected Heat:** {expected_heat} SHU")
-        st.markdown(f"**Expected Flavor Profile:** {expected_flavor}")
-        st.markdown(f"**Expected Yield:** {expected_yield}")
-        st.markdown(f"**Climate Suitability (Cyprus):** {expected_climate}")
+# Download all data
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    df.to_excel(writer, index=False)
+processed_data = output.getvalue()
 
-    search_term = st.sidebar.text_input("Search by Parent Name or Hybrid Trait:").lower()
-    if search_term:
-        df = df[df.apply(lambda row: search_term in row["Parent A"].lower() 
-                                      or search_term in row["Parent B"].lower() 
-                                      or search_term in row["Expected Flavor"].lower(), axis=1)]
+st.download_button(
+    label="Download All Hybrids as Excel",
+    data=processed_data,
+    file_name="all_hybrids.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
-    climate_filter = st.sidebar.selectbox("Select Climate Suitability:", options=["All", "High", "Medium"])
-    if climate_filter != "All":
-        df = df[df['Climate Suitability (Cyprus)'] == climate_filter]
-
-    min_heat = st.sidebar.slider("Minimum Expected Heat (SHU)", min_value=0, max_value=int(df['Expected Heat (SHU)'].max()), step=50000, value=0)
-    df = df[df['Expected Heat (SHU)'] >= min_heat]
-
-    sort_by = st.sidebar.selectbox("Sort By:", options=["Expected Heat (SHU)", "Expected Yield", "Novelty Flag", "AI Success Score"])
-    df = df.sort_values(by=sort_by, ascending=False)
-
-    def highlight_heat(val):
-        if val >= 1000000:
-            color = '#ff4c4c'
-        elif val >= 500000:
-            color = '#ff944c'
-        else:
-            color = '#ffd24c'
-        return f'background-color: {color}'
-
-    st.write("## Filtered Hybrid Combinations with AI Success Score")
-    st.dataframe(df.style.applymap(highlight_heat, subset=['Expected Heat (SHU)']))
-
-    st.write("## Heat vs. Estimated Days to Harvest")
-    scatter = alt.Chart(df).mark_circle(size=100).encode(
-        x=alt.X('Expected Heat (SHU):Q', title='Expected Heat (SHU)'),
-        y=alt.Y('Estimated Days to Harvest:Q', title='Estimated Days to Harvest'),
-        color=alt.Color('AI Success Score:N', legend=alt.Legend(title="AI Success Score")),
-        tooltip=['Parent A', 'Parent B', 'Expected Heat (SHU)', 'Estimated Days to Harvest', 'Predicted Flavor', 'AI Success Score']
-    ).interactive().properties(width=800, height=400)
-
-    st.altair_chart(scatter, use_container_width=True)
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False)
-    processed_data = output.getvalue()
-
-    st.download_button(
-        label="Download Filtered Data as Excel",
-        data=processed_data,
-        file_name="filtered_hybrids.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-else:
-    st.warning("Please upload your Excel file to explore the data.")
+conn.close()
