@@ -12,10 +12,13 @@ st.set_page_config(page_title="Chili Hybrid Explorer", layout="wide")
 model = None
 model_file = "success_score_model.pkl"
 try:
-    with open(model_file, "rb") as f:
+    with open("success_score_model.pkl", "rb") as f:
         model = pickle.load(f)
+    st.sidebar.success("✅ AI model loaded successfully!")
 except Exception as e:
-    st.error(f"Failed to load AI model: {e}")
+    st.sidebar.error(f"❌ AI model failed to load: {e}")
+    model = None
+
 
 # Custom header with branding
 st.markdown(
