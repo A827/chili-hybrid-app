@@ -47,6 +47,30 @@ if uploaded_file is not None:
     df["Predicted Flavor"] = df["Expected Flavor"].apply(lambda x: "Complex & Fruity")
     df["Estimated Days to Harvest"] = 90  # placeholder value
 
+    # Parent Combination Tool
+    st.sidebar.header("Pepper Combination Tool")
+    parent_options = sorted(set(df["Parent A"]).union(df["Parent B"]))
+    selected_parent_a = st.sidebar.selectbox("Select Parent A:", parent_options)
+    selected_parent_b = st.sidebar.selectbox("Select Parent B:", parent_options)
+
+    if selected_parent_a and selected_parent_b:
+        # Retrieve parent traits
+        parent_a_data = df[(df["Parent A"] == selected_parent_a) | (df["Parent B"] == selected_parent_a)].iloc[0]
+        parent_b_data = df[(df["Parent A"] == selected_parent_b) | (df["Parent B"] == selected_parent_b)].iloc[0]
+
+        # Calculate expected traits
+        expected_heat = (parent_a_data["Expected Heat (SHU)"] + parent_b_data["Expected Heat (SHU)"]) // 2
+        expected_flavor = f"{parent_a_data['Expected Flavor']} + {parent_b_data['Expected Flavor']}"
+        expected_yield = parent_a_data['Expected Yield'] if parent_a_data['Expected Yield'] == 'Very High' or parent_b_data['Expected Yield'] == 'Very High' else 'High'
+        expected_climate = 'High' if parent_a_data['Climate Suitability (Cyprus)'] == 'High' and parent_b_data['Climate Suitability (Cyprus)'] == 'High' else 'Medium'
+
+        # Display results
+        st.markdown("## Expected Hybrid Results")
+        st.markdown(f"**Expected Heat:** {expected_heat} SHU")
+        st.markdown(f"**Expected Flavor Profile:** {expected_flavor}")
+        st.markdown(f"**Expected Yield:** {expected_yield}")
+        st.markdown(f"**Climate Suitability (Cyprus):** {expected_climate}")
+
     # Search box
     search_term = st.sidebar.text_input("Search by Parent Name or Hybrid Trait:").lower()
     if search_term:
